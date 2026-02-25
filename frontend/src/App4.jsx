@@ -2,98 +2,49 @@ import { useState, useRef, useCallback, useEffect } from "react";
 
 const API_BASE = "http://localhost:8000";
 
-function WindowPicker({ onSelect }) {
-  const [windows, setWindows] = useState([]);
-  const [selected, setSelected] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const fileRef = useRef();
+const MODES = [
+  { id: "closed", label: "拉上纱帘", icon: "▮▮" },
+  { id: "half", label: "半开纱帘", icon: "▯▮" },
+  { id: "open", label: "完全打开", icon: "▯▯" },
+];
 
-  useEffect(() => {
-    fetch(API_BASE + "/api/windows")
-      .then(r => r.json())
-      .then(data => { setWindows(data.windows || []); setLoading(false); })
-      .catch(() => setLoading(false));
-  }, []);
+function UploadZone({ onFile }) {
+  const [over, setOver] = useState(false);
+  const ref = useRef();
 
-  const handleSelect = (w) => {
-    setSelected(w.filename);
-    onSelect({ previewUrl: w.preview_url, githubUrl: w.github_url, filename: w.filename });
-  };
-
-  // 保留手动上传入口（MVP 阶段仅展示，不实际发送文件）
-  const handleManualUpload = (file) => {
-    if (!file || !file.type.startsWith("image/")) return;
-    const localUrl = URL.createObjectURL(file);
-    setSelected("__manual__");
-    // 手动上传时没有 GitHub URL，后端 MVP 模式下无法处理
-    // 这里仅供展示，提示用户使用预设照片
-    onSelect({ previewUrl: localUrl, githubUrl: null, filename: file.name, isManual: true });
-  };
+  const handle = useCallback((file) => {
+    if (file && file.type.startsWith("image/")) onFile(file);
+  }, [onFile]);
 
   return (
-    <div style={{ maxWidth: 600, margin: "0 auto" }}>
-      <p style={{ fontSize: 14, color: "#8a7e6e", textAlign: "center", marginBottom: 20 }}>
-        请选择一张示例窗户照片，或点击下方上传自定义照片
+    <div
+      onClick={() => ref.current?.click()}
+      onDragOver={e => { e.preventDefault(); setOver(true); }}
+      onDragLeave={() => setOver(false)}
+      onDrop={e => { e.preventDefault(); setOver(false); handle(e.dataTransfer.files[0]); }}
+      style={{
+        width: "100%", maxWidth: 540, aspectRatio: "4/3", margin: "0 auto",
+        border: `2.5px dashed ${over ? "#7a6344" : "#c0b49e"}`,
+        borderRadius: 24, display: "flex", flexDirection: "column",
+        alignItems: "center", justifyContent: "center", cursor: "pointer",
+        background: over ? "rgba(122,99,68,0.04)" : "rgba(250,247,242,0.6)",
+        transition: "all 0.3s",
+      }}
+    >
+      <input ref={ref} type="file" accept="image/*" hidden
+        onChange={e => handle(e.target.files[0])} />
+      <svg width="56" height="56" viewBox="0 0 56 56" fill="none" style={{ opacity: 0.45, marginBottom: 16 }}>
+        <rect x="6" y="10" width="44" height="36" rx="4" stroke="#7a6344" strokeWidth="1.8" />
+        <path d="M6 36l12-12 9 9 7-7 16 16" stroke="#7a6344" strokeWidth="1.8" strokeLinejoin="round" fill="none" />
+        <circle cx="19" cy="21" r="3.5" stroke="#7a6344" strokeWidth="1.8" />
+        <path d="M28 3v11M23 8.5l5-5.5 5 5.5" stroke="#7a6344" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+      <p style={{ fontSize: 17, color: "#4a3f32", margin: 0, fontWeight: 500 }}>
+        点击上传 或 拖拽窗户照片到这里
       </p>
-
-      {loading ? (
-        <p style={{ textAlign: "center", color: "#b0a494" }}>加载中...</p>
-      ) : windows.length === 0 ? (
-        <p style={{ textAlign: "center", color: "#c0b49e" }}>
-          暂无预设照片，请将窗户照片放入 resources/windows 文件夹并推送到 GitHub
-        </p>
-      ) : (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 14, justifyContent: "center", marginBottom: 24 }}>
-          {windows.map(w => (
-            <div
-              key={w.filename}
-              onClick={() => handleSelect(w)}
-              style={{
-                width: 130, cursor: "pointer",
-                transform: selected === w.filename ? "scale(1.06)" : "scale(1)",
-                transition: "transform 0.2s",
-              }}
-            >
-              <div style={{
-                height: 100, borderRadius: 12, overflow: "hidden",
-                border: selected === w.filename ? "3px solid #7a6344" : "3px solid transparent",
-                boxShadow: selected === w.filename
-                  ? "0 6px 20px rgba(122,99,68,0.3)"
-                  : "0 2px 8px rgba(0,0,0,0.08)",
-                transition: "all 0.2s",
-              }}>
-                <img
-                  src={w.preview_url}
-                  alt={w.filename}
-                  style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                />
-              </div>
-              <p style={{
-                fontSize: 11, textAlign: "center", marginTop: 5,
-                color: selected === w.filename ? "#3a3022" : "#9a8e7e",
-                fontWeight: selected === w.filename ? 600 : 400,
-              }}>
-                {w.filename}
-              </p>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* 手动上传（MVP 阶段提示） */}
-      <div style={{ textAlign: "center" }}>
-        <input ref={fileRef} type="file" accept="image/*" hidden
-          onChange={e => handleManualUpload(e.target.files[0])} />
-        <button
-          onClick={() => fileRef.current?.click()}
-          style={{
-            padding: "8px 20px", borderRadius: 20, border: "1.5px dashed #c0b49e",
-            background: "transparent", color: "#9a8e7e", cursor: "pointer", fontSize: 13,
-          }}
-        >
-          📂 上传自定义照片（仅预览，需推送 GitHub 后方可生成）
-        </button>
-      </div>
+      <p style={{ fontSize: 13, color: "#9e9282", marginTop: 8 }}>
+        JPG / PNG / WEBP · 建议 2MB 以内
+      </p>
     </div>
   );
 }
@@ -156,7 +107,8 @@ function ProgressBar({ progress, status }) {
 
 export default function CurtainVisionApp() {
   const [step, setStep] = useState(0);
-  const [windowPhoto, setWindowPhoto] = useState(null); // { previewUrl, githubUrl, filename, isManual? }
+  const [file, setFile] = useState(null);
+  const [imageUrl, setImageUrl] = useState(null);
   const [styles, setStyles] = useState([]);
   const [style, setStyle] = useState(null);
   const [generating, setGenerating] = useState(false);
@@ -168,6 +120,7 @@ export default function CurtainVisionApp() {
 
   useEffect(() => { setFadeKey(k => k + 1); }, [step]);
 
+  // 从后端加载款式列表
   useEffect(() => {
     fetch(API_BASE + "/api/styles")
       .then(r => r.json())
@@ -175,31 +128,17 @@ export default function CurtainVisionApp() {
       .catch(() => {});
   }, []);
 
-  const reset = () => {
-    setStep(0);
-    setWindowPhoto(null);
-    setStyle(null);
-    setResultUrl(null);
-    setError(null);
-    setProgress(0);
-  };
-
-  const handleWindowSelect = (w) => {
-    setWindowPhoto(w);
-    if (!w.isManual) setStep(1);
-    // 手动上传时停在 step 0，仅显示预览，不推进
+  const handleFile = (f) => {
+    setFile(f);
+    setImageUrl(URL.createObjectURL(f));
+    setStep(1);
   };
 
   const handleGenerate = async () => {
-    if (!windowPhoto?.githubUrl) {
-      setError("请选择一张预设窗户照片（需要 GitHub 公开 URL 才能生成）");
-      return;
-    }
-
     setGenerating(true);
     setError(null);
     setProgress(0);
-    setStatusText("正在提交任务...");
+    setStatusText("正在上传照片...");
     setStep(3);
 
     try {
@@ -216,8 +155,8 @@ export default function CurtainVisionApp() {
       setTimeout(() => setStatusText("优化细节中，即将完成..."), 12000);
 
       const formData = new FormData();
+      formData.append("image", file);
       formData.append("style", style.id);
-      formData.append("window_url", windowPhoto.githubUrl);
 
       const resp = await fetch(`${API_BASE}/api/generate`, {
         method: "POST",
@@ -237,41 +176,65 @@ export default function CurtainVisionApp() {
         setProgress(100);
         setStatusText("生成完成！");
         setResultUrl(API_BASE + data.result_url);
-        setTimeout(() => { setGenerating(false); setStep(4); }, 800);
+        setTimeout(() => setStep(4), 600);
       } else {
         throw new Error(data.error || "生成失败");
       }
     } catch (e) {
-      setGenerating(false);
       setError(e.message);
       setStep(2);
+    } finally {
+      setGenerating(false);
     }
   };
 
+  const reset = () => {
+    setStep(0); setFile(null); setImageUrl(null);
+    setStyle(null); setResultUrl(null); setError(null);
+  };
+
   const btnPrimary = {
-    padding: "12px 32px", borderRadius: 28, border: "none",
-    background: "linear-gradient(135deg, #7a6344, #9e8564)",
-    color: "#fff", fontSize: 15, fontWeight: 600, cursor: "pointer",
-    boxShadow: "0 4px 16px rgba(122,99,68,0.28)", transition: "opacity 0.2s",
+    padding: "13px 44px", fontSize: 15, fontWeight: 600, color: "#fff",
+    background: "linear-gradient(135deg, #7a6344, #9e8564)", border: "none",
+    borderRadius: 12, cursor: "pointer", boxShadow: "0 6px 22px rgba(122,99,68,0.3)",
+    transition: "all 0.2s",
   };
   const btnSecondary = {
-    padding: "12px 24px", borderRadius: 28,
-    border: "1.5px solid #c0b49e", background: "rgba(255,255,255,0.8)",
-    color: "#6a5e4e", fontSize: 14, cursor: "pointer",
+    padding: "12px 30px", fontSize: 14, fontWeight: 500, color: "#7a6344",
+    background: "#fff", border: "2px solid #c8bca8", borderRadius: 12, cursor: "pointer",
   };
 
-  const steps = ["上传照片", "选择款式", "确认生成", "生成中"];
-
   return (
-    <div style={{ minHeight: "100vh", background: "linear-gradient(160deg, #faf7f2 0%, #f0ebe0 100%)", fontFamily: "'PingFang SC','Microsoft YaHei',sans-serif" }}>
-      <header style={{ padding: "20px 32px 0", borderBottom: "1px solid rgba(122,99,68,0.08)" }}>
-        <div style={{ maxWidth: 960, margin: "0 auto" }}>
-          <h1 style={{ fontSize: 22, fontWeight: 700, color: "#3a3022", margin: 0 }}>
-            帘想 <span style={{ fontWeight: 300, color: "#9a8e7e" }}>CurtainVision</span>
-          </h1>
+    <div style={{
+      minHeight: "100vh",
+      background: "linear-gradient(155deg, #faf8f4 0%, #f2ede5 35%, #eae3d8 100%)",
+      fontFamily: "'Noto Sans SC', 'SF Pro Display', -apple-system, sans-serif",
+    }}>
+      {/* Header */}
+      <header style={{
+        padding: "22px 36px", display: "flex", alignItems: "center", justifyContent: "space-between",
+        borderBottom: "1px solid rgba(122,99,68,0.1)", background: "rgba(250,248,244,0.8)",
+        backdropFilter: "blur(12px)", position: "sticky", top: 0, zIndex: 50,
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, cursor: "pointer" }} onClick={reset}>
+          <div style={{
+            width: 38, height: 38, borderRadius: 10,
+            background: "linear-gradient(135deg, #7a6344, #9e8564)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            boxShadow: "0 3px 10px rgba(122,99,68,0.3)",
+          }}>
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+              <rect x="3" y="2" width="14" height="2" rx="1" fill="#fff" />
+              <path d="M5 4v14c0 0 1.5-2.5 2.5-2.5s1.5 1.8 2.5 1.8 1.5-1.8 2.5-1.8S14 18 15 18V4" stroke="#fff" strokeWidth="1.3" fill="none" />
+            </svg>
+          </div>
+          <div>
+            <h1 style={{ fontSize: 19, fontWeight: 700, color: "#3a3022", margin: 0 }}>帘想 CurtainVision</h1>
+            <p style={{ fontSize: 11, color: "#9a8e7e", margin: 0, letterSpacing: 1.5 }}>AI 智能窗帘预览</p>
+          </div>
         </div>
-        <div style={{ maxWidth: 960, margin: "16px auto 0", display: "flex", gap: 8, alignItems: "center", paddingBottom: 16 }}>
-          {steps.map((label, i) => (
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          {["上传", "选款", "预览", "结果"].map((label, i) => (
             <div key={i} style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <div style={{
                 width: 26, height: 26, borderRadius: "50%", fontSize: 12, fontWeight: 600,
@@ -292,21 +255,23 @@ export default function CurtainVisionApp() {
       }}>
         <style>{`@keyframes fadeUp { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }`}</style>
 
-        {/* Step 0: 选择窗户照片 */}
+        {/* Step 0: Upload */}
         {step === 0 && (
           <div style={{ textAlign: "center" }}>
-            <h2 style={{ fontSize: 30, fontWeight: 700, color: "#3a3022", marginBottom: 6 }}>选择窗户照片</h2>
-            <p style={{ fontSize: 15, color: "#8a7e6e", marginBottom: 32 }}>从示例照片中选择，AI 将为您生成纱帘效果图</p>
-            <WindowPicker onSelect={handleWindowSelect} />
-            {windowPhoto?.isManual && (
-              <div style={{ marginTop: 20, padding: "12px 20px", background: "#fff8e8", borderRadius: 12, maxWidth: 480, margin: "20px auto 0", fontSize: 13, color: "#8a6a2a" }}>
-                ⚠️ 自定义照片仅可预览，如需生成效果图请将照片推送至 GitHub 后刷新选择
-              </div>
-            )}
+            <h2 style={{ fontSize: 30, fontWeight: 700, color: "#3a3022", marginBottom: 6 }}>上传您的窗户照片</h2>
+            <p style={{ fontSize: 15, color: "#8a7e6e", marginBottom: 32 }}>拍一张正面窗户照片，AI 将为您生成纱帘效果图</p>
+            <UploadZone onFile={handleFile} />
+            <div style={{ marginTop: 36, display: "flex", gap: 28, justifyContent: "center", flexWrap: "wrap" }}>
+              {[{ i: "📸", t: "正面拍摄效果最佳" }, { i: "💡", t: "光线充足更准确" }, { i: "📐", t: "包含完整窗框" }].map((tip, j) => (
+                <span key={j} style={{ fontSize: 13, color: "#8a7e6e", display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ fontSize: 18 }}>{tip.i}</span>{tip.t}
+                </span>
+              ))}
+            </div>
           </div>
         )}
 
-        {/* Step 1: 选择款式 */}
+        {/* Step 1: Select Style */}
         {step === 1 && (
           <div>
             <div style={{ textAlign: "center", marginBottom: 28 }}>
@@ -315,7 +280,7 @@ export default function CurtainVisionApp() {
             </div>
             <div style={{ display: "flex", justifyContent: "center", marginBottom: 28 }}>
               <div style={{ position: "relative" }}>
-                <img src={windowPhoto?.previewUrl} alt="" style={{ height: 140, borderRadius: 12, objectFit: "cover", boxShadow: "0 4px 16px rgba(0,0,0,0.1)" }} />
+                <img src={imageUrl} alt="" style={{ height: 140, borderRadius: 12, objectFit: "cover", boxShadow: "0 4px 16px rgba(0,0,0,0.1)" }} />
                 <button onClick={reset} style={{
                   position: "absolute", top: -8, right: -8, width: 26, height: 26,
                   borderRadius: "50%", border: "none", background: "#d9534f",
@@ -345,7 +310,7 @@ export default function CurtainVisionApp() {
           </div>
         )}
 
-        {/* Step 2: 确认生成 */}
+        {/* Step 2: Preview & Generate */}
         {step === 2 && (
           <div>
             <div style={{ textAlign: "center", marginBottom: 20 }}>
@@ -354,7 +319,7 @@ export default function CurtainVisionApp() {
             </div>
             <div style={{ display: "flex", gap: 24, justifyContent: "center", alignItems: "flex-start", flexWrap: "wrap" }}>
               <div style={{ textAlign: "center" }}>
-                <img src={windowPhoto?.previewUrl} alt="window" style={{ height: 240, borderRadius: 14, objectFit: "cover", boxShadow: "0 6px 20px rgba(0,0,0,0.1)" }} />
+                <img src={imageUrl} alt="window" style={{ height: 240, borderRadius: 14, objectFit: "cover", boxShadow: "0 6px 20px rgba(0,0,0,0.1)" }} />
                 <p style={{ fontSize: 13, color: "#8a7e6e", marginTop: 8 }}>您的窗户照片</p>
               </div>
               <div style={{ display: "flex", alignItems: "center", fontSize: 28, color: "#b0a494", paddingTop: 80 }}>+</div>
@@ -379,7 +344,7 @@ export default function CurtainVisionApp() {
           </div>
         )}
 
-        {/* Step 3: 生成中 */}
+        {/* Step 3: Generating */}
         {step === 3 && (
           <div style={{ textAlign: "center", paddingTop: 60 }}>
             <div style={{
@@ -395,7 +360,7 @@ export default function CurtainVisionApp() {
             <ProgressBar progress={progress} status={statusText} />
             <div style={{ marginTop: 40, display: "flex", gap: 24, justifyContent: "center", opacity: 0.6 }}>
               <div style={{ textAlign: "center" }}>
-                <img src={windowPhoto?.previewUrl} alt="" style={{ height: 100, borderRadius: 10, objectFit: "cover" }} />
+                <img src={imageUrl} alt="" style={{ height: 100, borderRadius: 10, objectFit: "cover" }} />
                 <p style={{ fontSize: 12, color: "#8a7e6e", marginTop: 6 }}>原始照片</p>
               </div>
               <div style={{ display: "flex", alignItems: "center", fontSize: 24, color: "#b0a494" }}>→</div>
@@ -407,7 +372,7 @@ export default function CurtainVisionApp() {
           </div>
         )}
 
-        {/* Step 4: 结果 */}
+        {/* Step 4: Result */}
         {step === 4 && (
           <div style={{ textAlign: "center" }}>
             <h2 style={{ fontSize: 26, fontWeight: 700, color: "#3a3022", marginBottom: 6 }}>效果图生成完成 🎉</h2>
@@ -418,7 +383,7 @@ export default function CurtainVisionApp() {
               </div>
               <div style={{ display: "flex", gap: 16, marginTop: 20, justifyContent: "center" }}>
                 <div style={{ flex: 1, maxWidth: 280 }}>
-                  <img src={windowPhoto?.previewUrl} alt="original" style={{ width: "100%", borderRadius: 12, boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }} />
+                  <img src={imageUrl} alt="original" style={{ width: "100%", borderRadius: 12, boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }} />
                   <p style={{ fontSize: 12, color: "#8a7e6e", marginTop: 6 }}>原始照片</p>
                 </div>
                 <div style={{ flex: 1, maxWidth: 280 }}>
@@ -434,7 +399,7 @@ export default function CurtainVisionApp() {
               </a>
             </div>
             <button onClick={reset} style={{ ...btnSecondary, marginTop: 16, border: "none", background: "transparent", color: "#9a8e7e" }}>
-              重新选择照片
+              上传新照片重新开始
             </button>
           </div>
         )}
