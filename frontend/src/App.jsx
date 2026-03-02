@@ -165,6 +165,16 @@ export default function CurtainVisionApp() {
   const [resultUrl, setResultUrl] = useState(null);
   const [error, setError] = useState(null);
   const [fadeKey, setFadeKey] = useState(0);
+  const [orderConfig, setOrderConfig] = useState({
+    width: "",
+    height: "",
+    quantity: 1,
+    room: "客厅",
+    notes: "",
+  });
+  const [orderSubmitting, setOrderSubmitting] = useState(false);
+  const [orderSubmitted, setOrderSubmitted] = useState(false);
+  const [orderError, setOrderError] = useState(null);
 
   useEffect(() => { setFadeKey(k => k + 1); }, [step]);
 
@@ -182,6 +192,16 @@ export default function CurtainVisionApp() {
     setResultUrl(null);
     setError(null);
     setProgress(0);
+    setOrderConfig({
+      width: "",
+      height: "",
+      quantity: 1,
+      room: "客厅",
+      notes: "",
+    });
+    setOrderSubmitting(false);
+    setOrderSubmitted(false);
+    setOrderError(null);
   };
 
   const handleWindowSelect = (w) => {
@@ -245,6 +265,51 @@ export default function CurtainVisionApp() {
       setGenerating(false);
       setError(e.message);
       setStep(2);
+    }
+  };
+
+  const basePrice = 1980;
+  const widthNum = parseFloat(orderConfig.width || "0");
+  const heightNum = parseFloat(orderConfig.height || "0");
+  const quantityNum = Number(orderConfig.quantity) || 1;
+  const areaFactor =
+    !widthNum || !heightNum ? 1 : Math.max((widthNum * heightNum) / 3, 1);
+  const totalPrice = Math.round(basePrice * areaFactor * quantityNum);
+
+  const handleCheckout = async () => {
+    if (!windowPhoto || !style || !resultUrl) {
+      setOrderError("请先完成效果图生成，再结算。");
+      return;
+    }
+    setOrderSubmitting(true);
+    setOrderError(null);
+    try {
+      const payload = {
+        windowPhoto,
+        style,
+        config: orderConfig,
+        pricing: {
+          basePrice,
+          totalPrice,
+          currency: "CNY",
+        },
+        resultUrl,
+        createdAt: new Date().toISOString(),
+      };
+      const resp = await fetch(`${API_BASE}/api/orders`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        throw new Error(data.detail || data.error || "保存订单失败");
+      }
+      setOrderSubmitted(true);
+    } catch (e) {
+      setOrderError(e.message);
+    } finally {
+      setOrderSubmitting(false);
     }
   };
 
@@ -409,33 +474,409 @@ export default function CurtainVisionApp() {
 
         {/* Step 4: 结果 */}
         {step === 4 && (
-          <div style={{ textAlign: "center" }}>
-            <h2 style={{ fontSize: 26, fontWeight: 700, color: "#3a3022", marginBottom: 6 }}>效果图生成完成 🎉</h2>
-            <p style={{ fontSize: 14, color: "#8a7e6e", marginBottom: 24 }}>AI 根据您的窗户照片和所选纱帘生成的效果图</p>
-            <div style={{ maxWidth: 600, margin: "0 auto" }}>
-              <div style={{ borderRadius: 16, overflow: "hidden", boxShadow: "0 12px 44px rgba(0,0,0,0.14)" }}>
-                <img src={resultUrl} alt="result" style={{ width: "100%", display: "block" }} />
-              </div>
-              <div style={{ display: "flex", gap: 16, marginTop: 20, justifyContent: "center" }}>
-                <div style={{ flex: 1, maxWidth: 280 }}>
-                  <img src={windowPhoto?.previewUrl} alt="original" style={{ width: "100%", borderRadius: 12, boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }} />
-                  <p style={{ fontSize: 12, color: "#8a7e6e", marginTop: 6 }}>原始照片</p>
+          <div
+            style={{
+              display: "flex",
+              gap: 24,
+              alignItems: "flex-start",
+              justifyContent: "center",
+              flexWrap: "wrap",
+            }}
+          >
+            <div style={{ flex: "2 1 380px", textAlign: "center" }}>
+              <h2
+                style={{
+                  fontSize: 26,
+                  fontWeight: 700,
+                  color: "#3a3022",
+                  marginBottom: 6,
+                }}
+              >
+                效果图生成完成 🎉
+              </h2>
+              <p
+                style={{
+                  fontSize: 14,
+                  color: "#8a7e6e",
+                  marginBottom: 24,
+                }}
+              >
+                AI 根据您的窗户照片和所选纱帘生成的效果图
+              </p>
+              <div style={{ maxWidth: 600, margin: "0 auto" }}>
+                <div
+                  style={{
+                    borderRadius: 16,
+                    overflow: "hidden",
+                    boxShadow: "0 12px 44px rgba(0,0,0,0.14)",
+                  }}
+                >
+                  <img
+                    src={resultUrl}
+                    alt="result"
+                    style={{ width: "100%", display: "block" }}
+                  />
                 </div>
-                <div style={{ flex: 1, maxWidth: 280 }}>
-                  <img src={resultUrl} alt="result" style={{ width: "100%", borderRadius: 12, boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }} />
-                  <p style={{ fontSize: 12, color: "#8a7e6e", marginTop: 6 }}>AI 效果图 · {style?.name}</p>
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 16,
+                    marginTop: 20,
+                    justifyContent: "center",
+                  }}
+                >
+                  <div style={{ flex: 1, maxWidth: 280 }}>
+                    <img
+                      src={windowPhoto?.previewUrl}
+                      alt="original"
+                      style={{
+                        width: "100%",
+                        borderRadius: 12,
+                        boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
+                      }}
+                    />
+                    <p
+                      style={{
+                        fontSize: 12,
+                        color: "#8a7e6e",
+                        marginTop: 6,
+                      }}
+                    >
+                      原始照片
+                    </p>
+                  </div>
+                  <div style={{ flex: 1, maxWidth: 280 }}>
+                    <img
+                      src={resultUrl}
+                      alt="result"
+                      style={{
+                        width: "100%",
+                        borderRadius: 12,
+                        boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
+                      }}
+                    />
+                    <p
+                      style={{
+                        fontSize: 12,
+                        color: "#8a7e6e",
+                        marginTop: 6,
+                      }}
+                    >
+                      AI 效果图 · {style?.name}
+                    </p>
+                  </div>
                 </div>
               </div>
+              <div
+                style={{
+                  display: "flex",
+                  gap: 12,
+                  justifyContent: "center",
+                  marginTop: 28,
+                  flexWrap: "wrap",
+                }}
+              >
+                <button onClick={() => setStep(1)} style={btnSecondary}>
+                  ← 换个款式
+                </button>
+                <a
+                  href={resultUrl}
+                  download={"curtain_" + style?.id + ".png"}
+                  style={{ textDecoration: "none" }}
+                >
+                  <button style={btnPrimary}>下载效果图</button>
+                </a>
+              </div>
+              <button
+                onClick={reset}
+                style={{
+                  ...btnSecondary,
+                  marginTop: 16,
+                  border: "none",
+                  background: "transparent",
+                  color: "#9a8e7e",
+                }}
+              >
+                重新选择照片
+              </button>
             </div>
-            <div style={{ display: "flex", gap: 12, justifyContent: "center", marginTop: 28, flexWrap: "wrap" }}>
-              <button onClick={() => setStep(1)} style={btnSecondary}>← 换个款式</button>
-              <a href={resultUrl} download={"curtain_" + style?.id + ".png"} style={{ textDecoration: "none" }}>
-                <button style={btnPrimary}>下载效果图</button>
-              </a>
+
+            <div
+              style={{
+                flex: "1 1 260px",
+                background: "rgba(255,255,255,0.9)",
+                borderRadius: 18,
+                padding: 20,
+                boxShadow: "0 8px 30px rgba(0,0,0,0.08)",
+                border: "1px solid #e4dacb",
+              }}
+            >
+              <h3
+                style={{
+                  fontSize: 18,
+                  fontWeight: 700,
+                  color: "#3a3022",
+                  marginTop: 0,
+                  marginBottom: 12,
+                }}
+              >
+                订单配置 & 结算
+              </h3>
+              <p
+                style={{
+                  fontSize: 12,
+                  color: "#a09484",
+                  marginTop: 0,
+                  marginBottom: 12,
+                }}
+              >
+                参考 Pfister 配置器的结构，这里汇总本次窗帘方案，方便后续线下跟进。
+              </p>
+              <div style={{ fontSize: 13, color: "#5a4e3e", marginBottom: 12 }}>
+                <div style={{ marginBottom: 4 }}>
+                  <strong>窗户照片：</strong>
+                  {windowPhoto?.filename}
+                </div>
+                <div style={{ marginBottom: 4 }}>
+                  <strong>纱帘款式：</strong>
+                  {style?.name}
+                </div>
+              </div>
+
+              <div style={{ marginBottom: 10 }}>
+                <label
+                  style={{
+                    display: "block",
+                    fontSize: 12,
+                    color: "#8a7e6e",
+                    marginBottom: 4,
+                  }}
+                >
+                  窗口宽度（米）
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.1"
+                  value={orderConfig.width}
+                  onChange={(e) =>
+                    setOrderConfig((c) => ({ ...c, width: e.target.value }))
+                  }
+                  placeholder="例如 2.4"
+                  style={{
+                    width: "100%",
+                    padding: "8px 10px",
+                    borderRadius: 10,
+                    border: "1px solid #d6cbb8",
+                    fontSize: 13,
+                  }}
+                />
+              </div>
+              <div style={{ marginBottom: 10 }}>
+                <label
+                  style={{
+                    display: "block",
+                    fontSize: 12,
+                    color: "#8a7e6e",
+                    marginBottom: 4,
+                  }}
+                >
+                  窗口高度（米）
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.1"
+                  value={orderConfig.height}
+                  onChange={(e) =>
+                    setOrderConfig((c) => ({ ...c, height: e.target.value }))
+                  }
+                  placeholder="例如 2.7"
+                  style={{
+                    width: "100%",
+                    padding: "8px 10px",
+                    borderRadius: 10,
+                    border: "1px solid #d6cbb8",
+                    fontSize: 13,
+                  }}
+                />
+              </div>
+              <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
+                <div style={{ flex: 1 }}>
+                  <label
+                    style={{
+                      display: "block",
+                      fontSize: 12,
+                      color: "#8a7e6e",
+                      marginBottom: 4,
+                    }}
+                  >
+                    数量（幅）
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={orderConfig.quantity}
+                    onChange={(e) =>
+                      setOrderConfig((c) => ({
+                        ...c,
+                        quantity: Number(e.target.value || 1),
+                      }))
+                    }
+                    style={{
+                      width: "100%",
+                      padding: "8px 10px",
+                      borderRadius: 10,
+                      border: "1px solid #d6cbb8",
+                      fontSize: 13,
+                    }}
+                  />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label
+                    style={{
+                      display: "block",
+                      fontSize: 12,
+                      color: "#8a7e6e",
+                      marginBottom: 4,
+                    }}
+                  >
+                    空间
+                  </label>
+                  <input
+                    type="text"
+                    value={orderConfig.room}
+                    onChange={(e) =>
+                      setOrderConfig((c) => ({ ...c, room: e.target.value }))
+                    }
+                    placeholder="如 客厅 / 主卧"
+                    style={{
+                      width: "100%",
+                      padding: "8px 10px",
+                      borderRadius: 10,
+                      border: "1px solid #d6cbb8",
+                      fontSize: 13,
+                    }}
+                  />
+                </div>
+              </div>
+              <div style={{ marginBottom: 12 }}>
+                <label
+                  style={{
+                    display: "block",
+                    fontSize: 12,
+                    color: "#8a7e6e",
+                    marginBottom: 4,
+                  }}
+                >
+                  备注（可选）
+                </label>
+                <textarea
+                  rows={3}
+                  value={orderConfig.notes}
+                  onChange={(e) =>
+                    setOrderConfig((c) => ({ ...c, notes: e.target.value }))
+                  }
+                  placeholder="例如：希望偏暖白、配遮光帘、预算范围等"
+                  style={{
+                    width: "100%",
+                    padding: "8px 10px",
+                    borderRadius: 10,
+                    border: "1px solid #d6cbb8",
+                    fontSize: 13,
+                    resize: "vertical",
+                  }}
+                />
+              </div>
+
+              <div
+                style={{
+                  padding: "10px 12px",
+                  borderRadius: 12,
+                  background:
+                    "linear-gradient(135deg, rgba(122,99,68,0.06), rgba(158,133,100,0.08))",
+                  marginBottom: 12,
+                  fontSize: 13,
+                  color: "#3a3022",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    marginBottom: 4,
+                  }}
+                >
+                  <span>参考单价</span>
+                  <span>¥ {basePrice.toLocaleString("zh-CN")}</span>
+                </div>
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    marginBottom: 4,
+                  }}
+                >
+                  <span>尺寸系数（约）</span>
+                  <span>× {areaFactor.toFixed(2)}</span>
+                </div>
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    fontWeight: 700,
+                    marginTop: 4,
+                  }}
+                >
+                  <span>预估总价</span>
+                  <span>¥ {totalPrice.toLocaleString("zh-CN")}</span>
+                </div>
+              </div>
+
+              {orderError && (
+                <div
+                  style={{
+                    marginBottom: 10,
+                    padding: "8px 10px",
+                    borderRadius: 10,
+                    background: "#fff5f5",
+                    border: "1px solid #f5c2c0",
+                    color: "#b1261a",
+                    fontSize: 12,
+                  }}
+                >
+                  {orderError}
+                </div>
+              )}
+              {orderSubmitted && (
+                <div
+                  style={{
+                    marginBottom: 10,
+                    padding: "8px 10px",
+                    borderRadius: 10,
+                    background: "#f0fff4",
+                    border: "1px solid #9ae6b4",
+                    color: "#276749",
+                    fontSize: 12,
+                  }}
+                >
+                  已将本次配置发送到 Airtable，可在后台查看并跟进客户。
+                </div>
+              )}
+
+              <button
+                onClick={handleCheckout}
+                disabled={orderSubmitting}
+                style={{
+                  ...btnPrimary,
+                  width: "100%",
+                  opacity: orderSubmitting ? 0.7 : 1,
+                  marginTop: 4,
+                }}
+              >
+                {orderSubmitting ? "正在提交到 Airtable..." : "发送配置到 Airtable"}
+              </button>
             </div>
-            <button onClick={reset} style={{ ...btnSecondary, marginTop: 16, border: "none", background: "transparent", color: "#9a8e7e" }}>
-              重新选择照片
-            </button>
           </div>
         )}
       </main>

@@ -2,18 +2,15 @@
 import os
 import sys
 import uuid
-import base64
 import httpx
 import replicate
 from pathlib import Path
-from io import BytesIO
-from PIL import Image
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Optional
+from typing import Optional
+from fastapi import FastAPI, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
-from typing import Optional
 
 sys.stdout.reconfigure(encoding="utf-8")
 load_dotenv()
@@ -27,54 +24,30 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-UPLOAD_DIR = Path("uploads")
 OUTPUT_DIR = Path("outputs")
-RESOURCES_DIR = Path("../resources/curtain")
-WINDOWS_DIR = Path("../resources/windows")
-UPLOAD_DIR.mkdir(exist_ok=True)
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 app.mount("/outputs", StaticFiles(directory="outputs"), name="outputs")
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 app.mount("/resources", StaticFiles(directory="../resources/curtain"), name="resources")
 app.mount("/windows", StaticFiles(directory="../resources/windows"), name="windows")
 
 SERVER_BASE = "http://localhost:8000"
 GITHUB_BASE = "https://raw.githubusercontent.com/kzma0627/CurtainVision/main/resources/curtain"
 GITHUB_WINDOWS_BASE = "https://raw.githubusercontent.com/kzma0627/CurtainVision/main/resources/windows"
+IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
+WINDOWS_DIR = Path("../resources/windows")
+
+AIRTABLE_API_KEY = os.getenv("AIRTABLE_API_KEY")
+AIRTABLE_BASE_ID = os.getenv("AIRTABLE_BASE_ID")
+AIRTABLE_TABLE_ID = os.getenv("AIRTABLE_TABLE_ID", "Orders")
 
 CURTAIN_STYLES = {
-    "1": {"name": "款式一", "preview": "1-3.jpg", "refs": ["1-1.jpg", "1-2.jpg", "1-3.jpg"]},
-    "2": {"name": "款式二", "preview": "2-3.jpg", "refs": ["2-1.jpg", "2-2.jpg", "2-3.jpg"]},
-    "3": {"name": "款式三", "preview": "3-3.jpg", "refs": ["3-1.jpg", "3-2.jpg", "3-3.jpg"]},
-    "4": {"name": "款式四", "preview": "4-3.jpg", "refs": ["4-1.jpg", "4-2.jpg", "4-3.jpg"]},
-    "5": {"name": "款式五", "preview": "5-3.jpg", "refs": ["5-1.jpg", "5-2.jpg", "5-3.jpg"]},
+    "1": {"name": "款式一", "preview": "1-3.jpg", "refs": ["1-3.jpg"]},
+    "2": {"name": "款式二", "preview": "2-3.jpg", "refs": ["2-3.jpg"]},
+    "3": {"name": "款式三", "preview": "3-3.jpg", "refs": ["3-3.jpg"]},
+    "4": {"name": "款式四", "preview": "4-3.jpg", "refs": ["4-3.jpg"]},
+    "5": {"name": "款式五", "preview": "5-3.jpg", "refs": ["5-3.jpg"]},
 }
-
-IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
-
-
-def image_to_data_uri(image_bytes: bytes, mime: str = "image/png") -> str:
-    b64 = base64.b64encode(image_bytes).decode("utf-8")
-    return f"data:{mime};base64,{b64}"
-
-
-def resize_image(image_bytes: bytes, max_size: int = 1024) -> bytes:
-    img = Image.open(BytesIO(image_bytes))
-    img = img.convert("RGB")
-    w, h = img.size
-    if w > h:
-        new_w = max_size
-        new_h = int(h * max_size / w)
-    else:
-        new_h = max_size
-        new_w = int(w * max_size / h)
-    new_w = (new_w // 8) * 8
-    new_h = (new_h // 8) * 8
-    img = img.resize((new_w, new_h), Image.LANCZOS)
-    buf = BytesIO()
-    img.save(buf, format="PNG", quality=95)
-    return buf.getvalue()
 
 
 @app.get("/api/health")
@@ -97,7 +70,6 @@ async def get_styles():
 
 @app.get("/api/windows")
 async def get_windows():
-    """返回 resources/windows 目录下所有预设窗户照片"""
     windows = []
     if WINDOWS_DIR.exists():
         for f in sorted(WINDOWS_DIR.iterdir()):
@@ -105,55 +77,142 @@ async def get_windows():
                 windows.append({
                     "filename": f.name,
                     "preview_url": SERVER_BASE + "/windows/" + f.name,
-                    # 上传 GitHub 后的公开 URL，供 Replicate 使用
                     "github_url": GITHUB_WINDOWS_BASE + "/" + f.name,
                 })
     return {"windows": windows}
 
 
-@app.get("/api/test-refs/{style}")
-async def test_refs(style: str):
-    """测试参考图URL是否可访问"""
-    if style not in CURTAIN_STYLES:
-        return {"error": "Unknown style"}
-
-    ref_urls = [GITHUB_BASE + "/" + ref for ref in CURTAIN_STYLES[style]["refs"]]
-    results = []
-
-    async with httpx.AsyncClient(timeout=10) as client:
+@app.get("/api/debug/urls")
+async def debug_urls(style: str = "1", window_url: str = ""):
+    results = {}
+    ref_urls = [GITHUB_BASE + "/" + ref for ref in CURTAIN_STYLES.get(style, CURTAIN_STYLES["1"])["refs"]]
+    ref_checks = []
+    async with httpx.AsyncClient(timeout=15) as client:
         for url in ref_urls:
             try:
-                resp = await client.head(url)
-                results.append({
-                    "url": url,
-                    "status": resp.status_code,
-                    "ok": resp.status_code == 200,
-                    "content_type": resp.headers.get("content-type", "unknown"),
-                    "size": resp.headers.get("content-length", "unknown"),
+                r = await client.head(url)
+                ref_checks.append({"url": url, "status": r.status_code, "ok": r.status_code == 200})
+            except Exception as e:
+                ref_checks.append({"url": url, "ok": False, "error": str(e)})
+    results["curtain_refs"] = ref_checks
+
+    if window_url:
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                r = await client.head(window_url)
+                results["window_url"] = {"url": window_url, "status": r.status_code, "ok": r.status_code == 200}
+        except Exception as e:
+            results["window_url"] = {"url": window_url, "ok": False, "error": str(e)}
+    else:
+        results["window_url"] = "未传入 window_url，用法: ?window_url=https://..."
+
+    all_images = ([window_url] if window_url else ["<请传入window_url>"]) + ref_urls
+    results["replicate_input_preview"] = {
+        "model": "google/nano-banana",
+        "image_input": all_images,
+        "image_count": len(all_images),
+        "note": "第1张=窗户照片，后3张=窗帘参考图",
+    }
+    all_ok = all(r["ok"] for r in ref_checks)
+    if window_url:
+        all_ok = all_ok and results["window_url"].get("ok", False)
+    results["all_urls_ok"] = all_ok
+    return results
+
+
+@app.post("/api/debug/dry-run")
+async def debug_dry_run(style: str = Form("1"), window_url: str = Form(...)):
+    if style not in CURTAIN_STYLES:
+        return {"error": "Unknown style"}
+    ref_urls = [GITHUB_BASE + "/" + ref for ref in CURTAIN_STYLES[style]["refs"]]
+    all_images = [window_url] + ref_urls
+    url_checks = []
+    async with httpx.AsyncClient(timeout=15) as client:
+        for i, url in enumerate(all_images):
+            label = "窗户照片" if i == 0 else f"窗帘参考图{i}"
+            try:
+                r = await client.head(url)
+                url_checks.append({
+                    "index": i, "label": label, "url": url,
+                    "status": r.status_code, "ok": r.status_code == 200,
+                    "content_type": r.headers.get("content-type", "unknown"),
+                    "size_bytes": r.headers.get("content-length", "unknown"),
                 })
             except Exception as e:
-                results.append({"url": url, "status": "error", "ok": False, "error": str(e)})
-
+                url_checks.append({"index": i, "label": label, "url": url, "ok": False, "error": str(e)})
+    all_ok = all(c["ok"] for c in url_checks)
     return {
+        "dry_run": True,
         "style": style,
-        "github_base": GITHUB_BASE,
-        "refs": results,
-        "all_ok": all(r["ok"] for r in results),
+        "image_input": all_images,
+        "url_checks": url_checks,
+        "all_urls_accessible": all_ok,
+        "conclusion": "✅ 参数正常，可以调用Replicate" if all_ok else "❌ 有URL无法访问",
     }
+
+
+@app.post("/api/orders")
+async def create_order(order: dict):
+    """
+    接收前端提交的订单配置，并转发到 Airtable。
+
+    需要在 .env 中配置：
+      - AIRTABLE_API_KEY
+      - AIRTABLE_BASE_ID
+      - AIRTABLE_TABLE_ID（表名或表 ID，默认为 Orders）
+    """
+    if not (AIRTABLE_API_KEY and AIRTABLE_BASE_ID and AIRTABLE_TABLE_ID):
+        raise HTTPException(500, "Airtable 未正确配置，请检查环境变量：AIRTABLE_API_KEY / AIRTABLE_BASE_ID / AIRTABLE_TABLE_ID")
+
+    airtable_url = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{AIRTABLE_TABLE_ID}"
+    headers = {
+        "Authorization": f"Bearer {AIRTABLE_API_KEY}",
+        "Content-Type": "application/json",
+    }
+
+    window_photo = order.get("windowPhoto") or {}
+    style = order.get("style") or {}
+    config = order.get("config") or {}
+    pricing = order.get("pricing") or {}
+
+    fields = {
+        "WindowFilename": window_photo.get("filename"),
+        "WindowPreviewUrl": window_photo.get("previewUrl"),
+        "WindowGithubUrl": window_photo.get("githubUrl"),
+        "StyleId": style.get("id"),
+        "StyleName": style.get("name"),
+        "ConfigWidth": config.get("width"),
+        "ConfigHeight": config.get("height"),
+        "Quantity": config.get("quantity"),
+        "Room": config.get("room"),
+        "Notes": config.get("notes"),
+        "BasePrice": pricing.get("basePrice"),
+        "TotalPrice": pricing.get("totalPrice"),
+        "Currency": pricing.get("currency") or "CNY",
+        "ResultUrl": order.get("resultUrl"),
+        "CreatedAt": order.get("createdAt"),
+    }
+
+    payload = {"records": [{"fields": fields}]}
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(airtable_url, json=payload, headers=headers)
+            resp.raise_for_status()
+        data = resp.json()
+        return {"success": True, "airtable": data}
+    except httpx.HTTPStatusError as e:
+        detail = f"Airtable 返回错误: {e.response.status_code} {e.response.text}"
+        raise HTTPException(502, detail)
+    except Exception as e:
+        raise HTTPException(500, f"保存到 Airtable 失败: {e}")
 
 
 @app.post("/api/generate")
 async def generate_curtain(
     style: str = Form(...),
-    image: Optional[UploadFile] = File(None),
-    window_url: Optional[str] = Form(None),
+    window_url: str = Form(...),
 ):
-    """
-    生成窗帘效果图。
-    - MVP 模式：传入 window_url（GitHub 公开 URL），直接用于 Replicate。
-    - 正式模式：传入 image 文件（暂时保留，未来接入公开存储后启用）。
-    两者必须传其一。
-    """
     if style not in CURTAIN_STYLES:
         raise HTTPException(400, "Unknown style: " + style)
 
@@ -161,37 +220,10 @@ async def generate_curtain(
     if not api_token:
         raise HTTPException(500, "REPLICATE_API_TOKEN not configured")
 
-    if not window_url and not image:
-        raise HTTPException(400, "Must provide either window_url or image file")
-
     try:
         file_id = str(uuid.uuid4())[:8]
-
-        # ── 确定窗户照片的公开 URL ──────────────────────────────────────
-        if window_url:
-            # MVP：直接使用传入的 GitHub 公开 URL
-            final_window_url = window_url
-            upload_name = file_id + "_window_ref.txt"  # 仅记录，不实际用
-            print("[MVP] Using GitHub window URL: " + final_window_url)
-        else:
-            # 预留：文件上传路径（目前 Replicate Files API 返回的 URL 需要鉴权，暂不可用）
-            content = await image.read()
-            resized = resize_image(content)
-            upload_name = file_id + "_window.png"
-            upload_path = UPLOAD_DIR / upload_name
-            with open(upload_path, "wb") as f:
-                f.write(resized)
-            # TODO: 接入 Cloudflare R2 / S3 后替换此处
-            raise HTTPException(501, "File upload mode not yet supported in MVP. Please use window_url.")
-
-        # ── 参考窗帘图（GitHub 公开 URL）─────────────────────────────────
-        ref_urls = [
-            GITHUB_BASE + "/" + ref
-            for ref in CURTAIN_STYLES[style]["refs"]
-        ]
-
-        # 第一张是窗户照片，后面是窗帘参考图
-        all_images = [final_window_url] + ref_urls
+        ref_urls = [GITHUB_BASE + "/" + ref for ref in CURTAIN_STYLES[style]["refs"]]
+        all_images = [window_url] + ref_urls
 
         prompt = (
             "Apply the curtains shown in the reference images to the window in the first photo. "
@@ -200,7 +232,7 @@ async def generate_curtain(
             "Photorealistic interior design photography, natural lighting, high quality."
         )
 
-        print("[Generating] style=" + style + " file=" + file_id + " total_images=" + str(len(all_images)))
+        print(f"[Generating] style={style} file={file_id} window={window_url}")
 
         output = replicate.run(
             "google/nano-banana",
@@ -210,7 +242,6 @@ async def generate_curtain(
             },
         )
 
-        # ── 解析输出 URL ─────────────────────────────────────────────────
         if hasattr(output, "url"):
             result_url = output.url
         elif hasattr(output, "__iter__") and not isinstance(output, str):
@@ -222,7 +253,6 @@ async def generate_curtain(
         else:
             result_url = str(output)
 
-        # ── 下载并保存结果 ───────────────────────────────────────────────
         async with httpx.AsyncClient(timeout=120) as client:
             resp = await client.get(result_url)
             resp.raise_for_status()
@@ -238,7 +268,7 @@ async def generate_curtain(
         return JSONResponse({
             "success": True,
             "result_url": "/outputs/" + output_name,
-            "window_url": final_window_url,
+            "window_url": window_url,
             "style": style,
         })
 
