@@ -1,0 +1,21 @@
+# Environment & secrets
+.env
+backend/.env
+
+# Python
+backend/venv/
+__pycache__/
+*.pyc
+
+# Generated outputs
+backend/outputs/
+
+# Node
+node_modules/
+
+# IDE
+.vscode/
+.idea/
+
+# Claude worktree config (local only)
+.claude/
