@@ -10,6 +10,9 @@ __pycache__/
 # Generated outputs
 backend/outputs/
 
+# SQLite database
+*.db
+
 # Node
 node_modules/
 
