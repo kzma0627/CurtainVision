@@ -11,6 +11,7 @@ import { useAuth } from "./contexts/AuthContext";
 import FabricSelector from "./components/FabricSelector";
 import PleatSelector from "./components/PleatSelector";
 import ArrangementSelector from "./components/ArrangementSelector";
+import InstallationSelector from "./components/InstallationSelector";
 import LengthSelector from "./components/LengthSelector";
 import ProgressBar from "./components/ProgressBar";
 import DimensionInput from "./components/DimensionInput";
@@ -33,6 +34,7 @@ export default function CurtainVisionApp() {
   const [pleatMultiplier, setPleatMultiplier] = useState(2);
   const [lengthType, setLengthType] = useState("floor");
   const [arrangement, setArrangement] = useState("double");
+  const [installationType, setInstallationType] = useState("plafond");
 
   // ——— Generation ———
   const [generating, setGenerating] = useState(false);
@@ -43,6 +45,10 @@ export default function CurtainVisionApp() {
 
   // ——— Display toggle ———
   const [showOriginal, setShowOriginal] = useState(false);
+
+  // ——— Debug ———
+  const [debugInfo, setDebugInfo] = useState(null);
+  const [showDebug, setShowDebug] = useState(false);
 
   // ——— Order ———
   const [showOrder, setShowOrder] = useState(false);
@@ -140,6 +146,7 @@ export default function CurtainVisionApp() {
       formData.append("length_type", lengthType);
       formData.append("fabric_category", selectedStyle.categoryId || "");
       formData.append("arrangement", arrangement);
+      formData.append("installation_type", installationType);
       if (guestUUID) formData.append("guest_uuid", guestUUID);
 
       const headers = {};
@@ -157,6 +164,7 @@ export default function CurtainVisionApp() {
       if (data.success) {
         setProgress(100);
         setStatusText(t("generate.done"));
+        if (data.debug) setDebugInfo(data.debug);
         setTimeout(() => { setGenerating(false); setResultUrl(API_BASE + data.result_url); }, 600);
       } else {
         throw new Error(data.error || t("generate.failed"));
@@ -177,7 +185,7 @@ export default function CurtainVisionApp() {
     try {
       const payload = {
         windowPhoto, photoLabel, style: selectedStyle,
-        config: { pleatMultiplier, lengthType, arrangement, width: orderWidth, height: orderHeight, quantity: orderQuantity, rollerType, notes: orderNotes },
+        config: { pleatMultiplier, lengthType, arrangement, installationType, width: orderWidth, height: orderHeight, quantity: orderQuantity, rollerType, notes: orderNotes },
         pricing: { basePrice: BASE_PRICE, totalPrice: pricing.totalPrice, currency: CURRENCY },
         resultUrl, createdAt: new Date().toISOString(),
       };
@@ -196,6 +204,7 @@ export default function CurtainVisionApp() {
       pleatMultiplier,
       lengthType,
       arrangement,
+      installationType,
       dimensions: { width: orderWidth, height: orderHeight },
       quantity: orderQuantity,
       rollerType,
@@ -252,11 +261,50 @@ export default function CurtainVisionApp() {
             </svg>
             {showOriginal ? t("result.viewResult") : t("result.viewOriginal")}
           </button>
-          <div style={{ display: "flex", gap: 8, marginTop: 12, justifyContent: "center" }}>
+          <div style={{ display: "flex", gap: 8, marginTop: 12, justifyContent: "center", alignItems: "center" }}>
             <a href={resultUrl} download={"curtain_" + (selectedStyle?.id || "") + ".png"} style={{ textDecoration: "none" }}>
               <button style={{ ...btnPrimary, width: "auto", padding: "8px 20px", fontSize: 12 }}>{t("result.download")}</button>
             </a>
+            {debugInfo && (
+              <button onClick={() => setShowDebug(!showDebug)} style={{
+                padding: "8px 12px", borderRadius: 12, border: "1px solid #d6cbb8",
+                background: showDebug ? "rgba(122,99,68,0.1)" : "rgba(255,255,255,0.9)",
+                color: "#5a4e3e", fontSize: 11, fontWeight: 500, cursor: "pointer",
+              }}>
+                {showDebug ? "Hide Debug" : "Debug"}
+              </button>
+            )}
           </div>
+          {showDebug && debugInfo && (
+            <div style={{ marginTop: 12, padding: 12, background: "rgba(0,0,0,0.03)", borderRadius: 10, border: "1px solid #e8e0d2", fontSize: 11, color: "#3a3022" }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
+                <span style={{ fontWeight: 600 }}>Duration:</span>
+                <span>{(debugInfo.duration_ms / 1000).toFixed(1)}s</span>
+              </div>
+              {debugInfo.overlay_url && (
+                <div style={{ marginBottom: 8 }}>
+                  <span style={{ fontWeight: 600, display: "block", marginBottom: 4 }}>Overlay sent to AI:</span>
+                  <img src={API_BASE + debugInfo.overlay_url} alt="overlay" style={{ width: "100%", borderRadius: 8, border: "1px solid #d6cbb8" }} />
+                </div>
+              )}
+              <div style={{ marginBottom: 8 }}>
+                <span style={{ fontWeight: 600, display: "block", marginBottom: 4 }}>Prompt:</span>
+                <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: 10, lineHeight: 1.4, background: "rgba(255,255,255,0.7)", padding: 8, borderRadius: 6, margin: 0, maxHeight: 160, overflowY: "auto" }}>
+                  {debugInfo.prompt}
+                </pre>
+              </div>
+              {debugInfo.ref_urls?.length > 0 && (
+                <div>
+                  <span style={{ fontWeight: 600, display: "block", marginBottom: 4 }}>Ref images:</span>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    {debugInfo.ref_urls.map((u, i) => (
+                      <img key={i} src={u} alt={`ref-${i}`} style={{ width: 60, height: 60, objectFit: "cover", borderRadius: 6, border: "1px solid #d6cbb8" }} />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       );
     }
@@ -399,6 +447,10 @@ export default function CurtainVisionApp() {
           {/* Arrangement */}
           <div style={sectionLabel}>{t("section.arrangement")}</div>
           <ArrangementSelector value={arrangement} onChange={setArrangement} />
+
+          {/* Installation type */}
+          <div style={sectionLabel}>{t("section.installation")}</div>
+          <InstallationSelector value={installationType} onChange={setInstallationType} />
 
           {/* Pleat */}
           <div style={sectionLabel}>{t("section.pleat")}</div>
