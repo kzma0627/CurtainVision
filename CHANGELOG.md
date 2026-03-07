@@ -31,6 +31,29 @@
 
 ---
 
+## v5.1 (2026-03-07)
+
+### 新功能
+- **安装类型选择器**：新增「安装方式」步骤，三个选项（天花板/窗框/窗帘杆），带 SVG 图标，引导 AI 正确定位轨道高度
+- **视觉叠加层（Visual Overlay）**：选择 cadre/tringle 时，后端用 Pillow 在原始窗户图上绘制半透明蓝色矩形标注窗帘安装区域，随叠加图一起送入模型，告诉 AI「将蓝色区域渲染成窗帘」
+- **Debug 面板**：前端新增 🔧 按钮，展开后显示本次生图的叠加层预览图、完整 Prompt 文本、参考图列表、生成耗时，便于调优
+
+### 架构变更
+- 生图策略从「遮罩 Inpainting」彻底切换到「视觉提示 Visual Prompting」——`nano-banana-pro` 不支持传统黑白 mask，只能通过图像内容引导
+- 后端新增 `generate_overlay()` 替代旧 `generate_mask()`；`build_prompt()` 增加 `has_overlay` 参数，两套 Prompt 策略自动切换
+- `/api/generate` 响应新增 `debug` 字段（`prompt`, `overlay_url`, `ref_images`, `duration_s`）
+- `INSTALLATION_PROMPTS` 字典映射三种安装方式到轨道描述词
+
+### Bug 修复 / 踩坑
+- PIL `img.close()` 会连带关闭底层 BytesIO → 改为先 `read()` 复制内容到独立 buffer 再用 PIL 打开
+- worktree 无 `.env` → `main.py` 增加向上四级目录查找主仓库 `.env` 的 fallback 逻辑
+- worktree 无 `venv` → `start.bat` 改为引用主仓库 `D:\CurtainVision\backend\venv`，并自动 `pip install pillow`、自动 `npm install`
+
+### 历史踩坑（补录）
+- `nano-banana-pro` 将 mask 图像视为「视觉参考」而非「编辑边界」，传统 inpainting mask 完全无效，需改用在原图上直接绘制彩色标注的方式引导模型
+
+---
+
 ## v4.0 (2026-03-03)
 
 ### 从 v3.0 的变更
@@ -98,3 +121,5 @@
 8. 前后端参数名不匹配 → 422
 9. `.env` 在 worktree 中缺失
 10. Preview viewport 650px 触发移动端布局
+11. `nano-banana-pro` 无 mask 参数，传统 inpainting 无效 → 改用在原图绘制彩色叠加层的 Visual Prompting 方案
+12. PIL `Image.close()` 关闭底层 BytesIO，导致后续读取为空 → 先 `read()` 复制内容到独立 buffer
