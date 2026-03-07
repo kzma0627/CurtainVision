@@ -22,10 +22,15 @@
   "length.floor": "Floor length",
   "length.windowsill": "Window length",
 
+  "installation.plafond": "Ceiling rail",
+  "installation.cadre": "Window frame",
+  "installation.tringle": "Decorative rod",
+
   "section.scenePhoto": "Scene photo",
   "section.fabric": "Fabric & Style",
   "section.arrangement": "Arrangement",
   "section.pleat": "Pleat multiplier",
+  "section.installation": "Installation type",
   "section.length": "Sheer length",
   "section.selected": "Selected: {{name}}",
 

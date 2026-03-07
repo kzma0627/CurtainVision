@@ -22,10 +22,15 @@
   "length.floor": "Bodenlang",
   "length.windowsill": "Fensterlang",
 
+  "installation.plafond": "Deckenschiene",
+  "installation.cadre": "Fensterrahmen",
+  "installation.tringle": "Deko-Stange",
+
   "section.scenePhoto": "Szenenfoto",
   "section.fabric": "Stoff & Stil",
   "section.arrangement": "Anordnung",
   "section.pleat": "Faltenfaktor",
+  "section.installation": "Installationstyp",
   "section.length": "Voile-Länge",
   "section.selected": "Ausgewählt: {{name}}",
 

@@ -3,8 +3,10 @@ import os
 import sys
 import io
 import uuid
+import time
 import httpx
 import replicate
+from PIL import Image as PILImage, ImageDraw
 from pathlib import Path
 from typing import Optional
 from fastapi import FastAPI, Form, File, UploadFile, Header, Request, HTTPException
@@ -20,6 +22,10 @@ from rate_limiter import check_guest_limit, check_user_limit, log_generation
 sys.stdout.reconfigure(encoding="utf-8")
 _backend_dir = Path(__file__).resolve().parent
 load_dotenv(_backend_dir / ".env")
+# Worktree fallback: load .env from main repo backend if not found locally
+_main_env = _backend_dir.parent.parent.parent.parent / "backend" / ".env"
+if _main_env.exists():
+    load_dotenv(_main_env)
 load_dotenv()
 
 app = FastAPI(title="CurtainVision API", version="5.0.0")
@@ -75,18 +81,88 @@ ARRANGEMENT_PROMPTS = {
     "right": "Single sheer panel, gathered to the right.",
 }
 
-# Track + Length merged: the ONE critical visual constraint
-LENGTH_PROMPTS = {
-    "floor": (
-        "CRITICAL — HANGING: A slim curtain rail sits at the window frame's top edge (not the ceiling, no decorative rod). "
-        "The sheer hangs from this rail and extends all the way down to the floor. The hem touches the floor."
-    ),
-    "windowsill": (
-        "CRITICAL — HANGING: A slim curtain rail sits at the window frame's top edge (not the ceiling, no decorative rod). "
-        "The sheer hangs from this rail and ends exactly at the windowsill — the bottom ledge of the window. "
-        "Bare wall is visible between the curtain hem and the floor."
-    ),
+# Installation type → track description (used in merged CRITICAL prompt)
+INSTALLATION_PROMPTS = {
+    "plafond": "a slim curtain rail mounted flush on the ceiling",
+    "cadre": "a slim curtain rail at the window frame's top edge (not the ceiling)",
+    "tringle": "a decorative curtain rod with visible rings, mounted just above the window frame",
 }
+
+# ── Visual overlay config ──
+OVERLAY_COLOR = (173, 216, 230, 80)   # Light-blue semi-transparent
+TOP_SKIP_RATIO = 0.18                 # Skip top 18% for cadre/tringle
+WINDOWSILL_RATIO = 0.75               # Approx windowsill position
+X_MARGIN_RATIO = 0.10                 # Left/right margin
+
+
+def _build_length_prompt(installation_type: str, length_type: str) -> str:
+    """Merge installation type + length into the single CRITICAL constraint."""
+    track_desc = INSTALLATION_PROMPTS.get(installation_type, INSTALLATION_PROMPTS["plafond"])
+    if length_type == "floor":
+        return (
+            f"CRITICAL — HANGING: The sheer hangs from {track_desc} "
+            "and extends all the way down to the floor. The hem touches the floor."
+        )
+    else:  # windowsill
+        return (
+            f"CRITICAL — HANGING: The sheer hangs from {track_desc} "
+            "and ends exactly at the windowsill — the bottom ledge of the window. "
+            "Bare wall is visible between the curtain hem and the floor."
+        )
+
+
+def generate_overlay(
+    image_source, installation_type: str, length_type: str
+) -> Optional[io.BytesIO]:
+    """
+    Draw a semi-transparent blue rectangle on the original image to mark
+    where curtains should appear ('visual prompting' for nano-banana-pro).
+    Returns annotated image as BytesIO PNG, or None on failure.
+    The original image_source BytesIO is NOT consumed.
+    """
+    if installation_type == "plafond":
+        return None
+
+    try:
+        # Load image into a separate buffer (preserve original)
+        if isinstance(image_source, io.BytesIO):
+            image_source.seek(0)
+            raw = image_source.read()
+            image_source.seek(0)
+            img = PILImage.open(io.BytesIO(raw)).convert("RGBA")
+        elif isinstance(image_source, str):
+            resp = httpx.get(image_source, timeout=15)
+            resp.raise_for_status()
+            img = PILImage.open(io.BytesIO(resp.content)).convert("RGBA")
+        else:
+            return None
+
+        width, height = img.size
+
+        # Y range: top depends on installation type
+        y_top = int(height * TOP_SKIP_RATIO)  # cadre / tringle
+        y_bottom = height if length_type == "floor" else int(height * WINDOWSILL_RATIO)
+
+        # X range: leave margins
+        x_left = int(width * X_MARGIN_RATIO)
+        x_right = int(width * (1 - X_MARGIN_RATIO))
+
+        # Draw semi-transparent overlay
+        overlay = PILImage.new("RGBA", (width, height), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(overlay)
+        draw.rectangle([x_left, y_top, x_right, y_bottom], fill=OVERLAY_COLOR)
+        img = PILImage.alpha_composite(img, overlay)
+
+        # Convert back to RGB for API
+        result = img.convert("RGB")
+        buf = io.BytesIO()
+        result.save(buf, format="PNG")
+        buf.seek(0)
+        buf.name = "overlay.png"
+        return buf
+    except Exception as e:
+        print(f"[Overlay] Failed to generate overlay: {e}")
+        return None
 
 
 def build_prompt(
@@ -94,15 +170,25 @@ def build_prompt(
     pleat_multiplier: float = 2.0,
     length_type: str = "floor",
     arrangement: str = "double",
+    installation_type: str = "plafond",
+    has_overlay: bool = False,
 ) -> str:
-    parts = [
-        # Core instruction — concise, one paragraph
-        "Add sheer curtains to the window in the first image. "
-        "Match the exact fabric texture, color, and transparency from the reference image(s). "
-        "Keep the same camera angle, room, walls, floor, furniture, and lighting. Only add the curtain.",
-    ]
+    if has_overlay:
+        parts = [
+            "Transform the semi-transparent blue overlay region in the first image "
+            "into realistic sheer curtains using the exact fabric texture, color, and transparency "
+            "from the reference image(s). "
+            "CRITICAL: Only modify the blue-tinted area. Keep the ceiling, walls above the overlay, "
+            "floor, furniture, camera angle, and lighting EXACTLY unchanged.",
+        ]
+    else:
+        parts = [
+            "Add sheer curtains to the window in the first image. "
+            "Match the exact fabric texture, color, and transparency from the reference image(s). "
+            "Keep the same camera angle, room, walls, floor, furniture, and lighting. Only add the curtain.",
+        ]
     # The ONE critical constraint: track position + length (merged)
-    parts.append(LENGTH_PROMPTS.get(length_type, LENGTH_PROMPTS["floor"]))
+    parts.append(_build_length_prompt(installation_type, length_type))
     # Arrangement
     parts.append(ARRANGEMENT_PROMPTS.get(arrangement, ARRANGEMENT_PROMPTS["double"]))
     # Pleat fullness
@@ -230,6 +316,7 @@ def _build_airtable_record(item: dict) -> dict:
         "PleatMultiplier": config.get("pleatMultiplier"),
         "LengthType": config.get("lengthType"),
         "Arrangement": config.get("arrangement"),
+        "InstallationType": config.get("installationType"),
         "ConfigWidth": config.get("width"),
         "ConfigHeight": config.get("height"),
         "Quantity": config.get("quantity"),
@@ -291,6 +378,7 @@ async def generate_curtain(
     length_type: str = Form("floor"),
     fabric_category: str = Form("sheerSolar"),
     arrangement: str = Form("double"),
+    installation_type: str = Form("plafond"),
     guest_uuid: Optional[str] = Form(None),
     authorization: str = Header(None),
 ):
@@ -322,6 +410,7 @@ async def generate_curtain(
         })
 
     try:
+        t_start = time.time()
         file_id = str(uuid.uuid4())[:8]
         ref_urls = [GITHUB_BASE + "/" + ref for ref in CURTAIN_STYLES[style]["refs"]]
 
@@ -339,16 +428,37 @@ async def generate_curtain(
         else:
             raise HTTPException(400, "Either window_url or window_file is required")
 
-        all_images = [window_image] + ref_urls
+        # Visual overlay for non-ceiling installations
+        overlay_url = None
+        has_overlay = False
+        annotated = generate_overlay(window_image, installation_type, length_type)
+        if annotated is not None:
+            has_overlay = True
+            # Save overlay for debug inspection
+            overlay_name = f"overlay_{file_id}.png"
+            annotated.seek(0)
+            with open(OUTPUT_DIR / overlay_name, "wb") as f:
+                f.write(annotated.read())
+            annotated.seek(0)
+            annotated.name = "overlay.png"
+            overlay_url = "/outputs/" + overlay_name
+            window_for_ai = annotated
+        else:
+            window_for_ai = window_image
 
         prompt = build_prompt(
             fabric_category=fabric_category,
             pleat_multiplier=pleat_multiplier,
             length_type=length_type,
             arrangement=arrangement,
+            installation_type=installation_type,
+            has_overlay=has_overlay,
         )
 
-        print(f"[Generating] style={style} cat={fabric_category} pleat={pleat_multiplier}x len={length_type} arr={arrangement}")
+        all_images = [window_for_ai] + ref_urls
+
+        print(f"[Generating] style={style} cat={fabric_category} pleat={pleat_multiplier}x "
+              f"len={length_type} arr={arrangement} install={installation_type} overlay={'yes' if has_overlay else 'no'}")
 
         output = replicate.run(
             "google/nano-banana-pro",
@@ -376,8 +486,9 @@ async def generate_curtain(
         with open(output_path, "wb") as f:
             f.write(result_bytes)
 
+        duration_ms = int((time.time() - t_start) * 1000)
         log_generation(user_id=user_id, guest_uuid=guest_uuid, ip=ip, style=style)
-        print("[Done] " + output_name)
+        print(f"[Done] {output_name} in {duration_ms}ms")
 
         return JSONResponse({
             "success": True,
@@ -387,6 +498,13 @@ async def generate_curtain(
             "pleat_multiplier": pleat_multiplier,
             "length_type": length_type,
             "arrangement": arrangement,
+            "installation_type": installation_type,
+            "debug": {
+                "prompt": prompt,
+                "overlay_url": overlay_url,
+                "ref_urls": ref_urls,
+                "duration_ms": duration_ms,
+            },
         })
 
     except HTTPException:

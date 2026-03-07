@@ -22,10 +22,15 @@
   "length.floor": "Jusqu'au sol",
   "length.windowsill": "Jusqu'à la fenêtre",
 
+  "installation.plafond": "Rail au plafond",
+  "installation.cadre": "Sur le cadre",
+  "installation.tringle": "Tringle déco",
+
   "section.scenePhoto": "Photo de la scène",
   "section.fabric": "Tissu & Style",
   "section.arrangement": "Disposition",
   "section.pleat": "Multiplicateur de plis",
+  "section.installation": "Type d'installation",
   "section.length": "Longueur du voile",
   "section.selected": "Sélectionné : {{name}}",
 

@@ -22,10 +22,15 @@
   "length.floor": "垂至地面",
   "length.windowsill": "覆盖窗户",
 
+  "installation.plafond": "天花板轨道",
+  "installation.cadre": "窗框安装",
+  "installation.tringle": "装饰杆",
+
   "section.scenePhoto": "场景照片",
   "section.fabric": "面料 & 款式",
   "section.arrangement": "窗帘布置",
   "section.pleat": "褶皱倍数",
+  "section.installation": "安装方式",
   "section.length": "纱帘长度",
   "section.selected": "已选：{{name}}",
 

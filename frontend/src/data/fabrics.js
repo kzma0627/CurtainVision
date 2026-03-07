@@ -41,3 +41,9 @@ export const ARRANGEMENT_OPTIONS = [
   { id: "left", labelKey: "arrangement.left" },
   { id: "right", labelKey: "arrangement.right" },
 ];
+
+export const INSTALLATION_OPTIONS = [
+  { id: "plafond", labelKey: "installation.plafond" },
+  { id: "cadre", labelKey: "installation.cadre" },
+  { id: "tringle", labelKey: "installation.tringle" },
+];
